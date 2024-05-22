@@ -2,6 +2,7 @@ extern crate clap;
 extern crate sprs;
 extern crate ndarray;
 
+use std::ops::Mul;
 use clap::Parser;
 use std::fs::File;
 use std::io::{BufReader, Read};
@@ -31,7 +32,7 @@ fn read_alignment(file_path: &str) ->
     Result<(
         Vec<String>, // queries
         Vec<String>, // subjects
-        CsMat<i8>, // Aligned
+        CsMat<usize>, // Aligned
         CsMat<f32>, // Bitscore
         CsMat<usize>, // sstart
         CsMat<usize>, // send
@@ -39,6 +40,7 @@ fn read_alignment(file_path: &str) ->
         HashMap<String, usize>, // qseqids
         HashMap<String, usize>), // sseqids
         Box<dyn Error>> {
+    println!("Attempting to open alignment and autodetect if gzipped or not");
     // Check if the file path ends with ".gz"
     let is_gzipped = file_path.ends_with(".gz");
 
@@ -62,7 +64,7 @@ fn read_alignment(file_path: &str) ->
 
     // Vector to store alignments
     let mut alignments: Vec<AlnRec> = Vec::new();
-
+    println!("Starting to read in alignments");
     // Iterate over each record and print selected columns
     for result in csv_reader.records() {
         let record = result?;
@@ -76,7 +78,7 @@ fn read_alignment(file_path: &str) ->
         // Create a Record object and push it to the vector
         alignments.push(AlnRec { qseqid, sseqid, slen, sstart, send, bitscore });
     }
-
+    println!("Completed reading of alignments. Starting the build of matricies");
     // Collect unique qseqids and sseqids
     let mut qseqid_set: HashSet<String> = HashSet::new();
     let mut sseqid_set: HashSet<String> = HashSet::new();
@@ -121,6 +123,7 @@ fn read_alignment(file_path: &str) ->
         .map(|record| (record.sseqid, record.slen))
         .collect();    
 
+    println!("Completed loading of alignments into data structures.");
 
     Ok((
         queries_vec,
@@ -141,10 +144,12 @@ fn build_subject_cover(
     sends: Vec<usize>,
 ) ->     Result<Array1<u32>, Box<dyn Error>> {
 
-    println!("{:?}", slen);
     let mut cov_arr = Array1::<u32>::zeros(slen);
 
     for i in 0..sstarts.len() {
+        if sends[i] > slen {
+            println!("Incorrect send discovered!");
+        }
         cov_arr.slice_mut(s![sstarts[i]-1..sends[i]]).mapv_inplace(|x| x + 1);
     }
 
@@ -170,9 +175,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let strim_5 = 18;
     let strim_3 = 18;
-    let sd_mean_cutoff = 4.0;
+    let sd_mean_cutoff = 1.0;
 
-    for subj_i in 0..3 {
+    let mut subj_pass_arr: Vec<usize> = vec![0; subjects_vec.len()];
+
+    for subj_i in 0..subjects_vec.len() {
         let row_subj = &subjects_vec[subj_i];
         let row_slen = sseqid_slen_map[row_subj];
         let row_sstarts = sstart_matrix.slice_outer(subj_i..subj_i+1).data().to_vec();
@@ -183,12 +190,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             row_sstarts,
             row_sends
         )?;
-        println!("{:?}", cov_arr);
-        
+
+        // A bunch of stuff to support trimming 5' and 3' ends checking to be sure the subject is big enough to support this...
         let  cov_arr_f32: Array1<f32>;
-
-
-
         if cov_arr.len() > (strim_5 + strim_3) {
                 cov_arr_f32 = cov_arr.slice(s![strim_5..(cov_arr.len() - strim_3)]).mapv(|x| x as f32);
         }  else {
@@ -197,12 +201,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         let cov_mean = cov_arr_f32.mean_axis(Axis(0)).unwrap().into_scalar();
         let cov_std = cov_arr_f32.std_axis(Axis(0), 0.0).into_scalar();
         let cov_pass = (cov_std / cov_mean) < sd_mean_cutoff;
-        println!("{:?}", cov_mean);
-        println!("{:?}", cov_std);
-        println!("{:?}", cov_pass);
-
+        // Finally record the pass / fail here
+        if cov_pass {
+            subj_pass_arr[subj_i] = 1;
+        } else {
+            subj_pass_arr[subj_i] = 0;
+        }
         
-    }
+    } // end of first subject coverage filter 
+
+    println!("{:?}", subj_pass_arr);
 
     Ok(())
 }
