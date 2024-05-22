@@ -9,6 +9,7 @@ csv = "1.3.0"  # Adjust the version as needed
 flate2 = "1.0.30"
 sprs = "0.11.1" # Adjust the version as needed
 ndarray = "0.15.3"
+rayon = "1.10.0"
 
 # Optional: Add dependencies for additional functionalities (e.g., logging)
 

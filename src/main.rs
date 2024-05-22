@@ -1,15 +1,16 @@
 extern crate clap;
-extern crate sprs;
 extern crate ndarray;
+extern crate rayon;
 
-use std::ops::Mul;
 use clap::Parser;
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::error::Error;
-use sprs::{CsMat, TriMat};
 use std::collections::{HashMap, HashSet};
 use ndarray::{Array1, s, Axis};
+use rayon::prelude::*;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 #[derive(Parser, Debug)] 
 #[command(version, about)]
@@ -18,7 +19,6 @@ struct Args {
     aln: String,
 }
 
-#[derive(Debug)]
 struct AlnRec {
     qseqid: String,
     sseqid: String,
@@ -28,18 +28,18 @@ struct AlnRec {
     bitscore: f32,
 }
 
+struct Alignments {
+    qseqid_set: HashSet<String>,
+    sseqid_set: HashSet<String>,
+    slen_map: HashMap<String, usize>,
+    sstarts_map: HashMap<String, HashMap<String, usize>>,
+    sends_map: HashMap<String, HashMap<String, usize>>,
+    q_s_bitscore_map: HashMap<String, HashMap<String, f32>>,
+}
+
+
 fn read_alignment(file_path: &str) -> 
-    Result<(
-        Vec<String>, // queries
-        Vec<String>, // subjects
-        CsMat<usize>, // Aligned
-        CsMat<f32>, // Bitscore
-        CsMat<usize>, // sstart
-        CsMat<usize>, // send
-        HashMap<String, usize>, // subject lengths
-        HashMap<String, usize>, // qseqids
-        HashMap<String, usize>), // sseqids
-        Box<dyn Error>> {
+    Result<Alignments, Box<dyn Error>> {
     println!("Attempting to open alignment and autodetect if gzipped or not");
     // Check if the file path ends with ".gz"
     let is_gzipped = file_path.ends_with(".gz");
@@ -62,11 +62,24 @@ fn read_alignment(file_path: &str) ->
         .delimiter(b'\t') // Set the delimiter to tab
         .from_reader(reader);
 
-    // Vector to store alignments
-    let mut alignments: Vec<AlnRec> = Vec::new();
+    
     println!("Starting to read in alignments");
-    // Iterate over each record and print selected columns
-    for result in csv_reader.records() {
+    
+    // subject lengths as a hashmap
+    let mut slen_map: HashMap<String, usize> = HashMap::new();
+
+    // Collect unique qseqids and sseqids
+    let mut qseqid_set: HashSet<String> = HashSet::new();
+    let mut sseqid_set: HashSet<String> = HashSet::new();
+
+    // Per subject query sstart and sends as nested HashMap[subject_id][query_id] = u32 
+    let mut sstarts_map: HashMap<String, HashMap<String, usize>> = HashMap::new();
+    let mut sends_map: HashMap<String, HashMap<String, usize>> = HashMap::new();
+
+    // Bitscores for each subject / query pairing HashMap[Query][Subject] = f32 (bitscore)
+    let mut q_s_bitscore_map: HashMap<String, HashMap<String, f32>> = HashMap::new();
+
+    for result in csv_reader.records() { // Iterate over each record
         let record = result?;
         // Extract values from specified columns
         let qseqid = record.get(0).unwrap_or("").to_string();
@@ -75,124 +88,96 @@ fn read_alignment(file_path: &str) ->
         let sstart = record.get(8).unwrap_or("0").parse::<usize>().unwrap_or(0);
         let send = record.get(9).unwrap_or("0").parse::<usize>().unwrap_or(0);
         let bitscore = record.get(11).unwrap_or("0.0").parse::<f32>().unwrap_or(0.0);
-        // Create a Record object and push it to the vector
-        alignments.push(AlnRec { qseqid, sseqid, slen, sstart, send, bitscore });
-    }
-    println!("Completed reading of alignments. Starting the build of matricies");
-    // Collect unique qseqids and sseqids
-    let mut qseqid_set: HashSet<String> = HashSet::new();
-    let mut sseqid_set: HashSet<String> = HashSet::new();
-    for record in &alignments {
-        qseqid_set.insert(record.qseqid.clone());
-        sseqid_set.insert(record.sseqid.clone());
-    }
-    let mut queries_vec: Vec<_> = qseqid_set.clone().into_iter().collect();
-    queries_vec.sort();
-    let mut subjects_vec: Vec<_> = sseqid_set.clone().into_iter().collect();
-    subjects_vec.sort();
-    // Create maps to store indices for qseqids and sseqids
-    let qseqid_indices: HashMap<String, usize> = queries_vec.iter().enumerate().map(|(i, s)| (s.clone(), i)).collect();
-    let sseqid_indices: HashMap<String, usize> = subjects_vec.iter().enumerate().map(|(i, s)| (s.clone(), i)).collect();
-
-    // Create triplet matrices for bitscore, sstart, and send
-    let mut bitscore_triplet = TriMat::with_capacity((sseqid_set.len(), qseqid_set.len()), alignments.len());
-    let mut sstart_triplet = TriMat::with_capacity((sseqid_set.len(), qseqid_set.len()), alignments.len());
-    let mut send_triplet = TriMat::with_capacity((sseqid_set.len(), qseqid_set.len()), alignments.len());
-    let mut aligned_triplet = TriMat::with_capacity((sseqid_set.len(), qseqid_set.len()), alignments.len());
-
-    // Fill the triplet matrices with values
-    for record in &alignments {
-        let sseqid_index = *sseqid_indices.get(&record.sseqid).unwrap();
-        let qseqid_index = *qseqid_indices.get(&record.qseqid).unwrap();
-
-        bitscore_triplet.add_triplet(sseqid_index, qseqid_index, record.bitscore);
-        sstart_triplet.add_triplet(sseqid_index, qseqid_index, record.sstart);
-        send_triplet.add_triplet(sseqid_index, qseqid_index, record.send);
-        aligned_triplet.add_triplet(sseqid_index, qseqid_index, 1);
+        
+        qseqid_set.insert(qseqid.clone());
+        sseqid_set.insert(sseqid.clone());
+        slen_map.insert(sseqid.clone(), slen.clone());
+        sstarts_map.entry(
+            sseqid.clone()).or_insert(HashMap::new()
+        ).insert(qseqid.clone(), sstart.clone());
+        sends_map.entry(
+            sseqid.clone()).or_insert(HashMap::new()
+        ).insert(qseqid.clone(), send.clone());
+        q_s_bitscore_map.entry(
+            qseqid.clone()).or_insert(HashMap::new()
+        ).insert(sseqid.clone(), bitscore.clone());
     }
 
+    println!("Completed reading of alignments.");
 
-    // Convert triplet matrices into compressed sparse row matrices
-    let bitscore_matrix = bitscore_triplet.to_csr();
-    let sstart_matrix = sstart_triplet.to_csr();
-    let send_matrix = send_triplet.to_csr();
-    let aligned_matrix = aligned_triplet.to_csr();
-
-    // Finally the subject to subject_len mapping:
-    let sseqid_slen_map: HashMap<_, _> = alignments.into_iter()
-        .map(|record| (record.sseqid, record.slen))
-        .collect();    
-
-    println!("Completed loading of alignments into data structures.");
-
-    Ok((
-        queries_vec,
-        subjects_vec,
-        aligned_matrix,
-        bitscore_matrix, 
-        sstart_matrix, 
-        send_matrix,
-        sseqid_slen_map,
-        qseqid_indices, 
-        sseqid_indices
-    )) 
+    Ok(
+        Alignments{
+            qseqid_set,
+            sseqid_set,
+            slen_map,
+            sstarts_map,
+            sends_map,
+            q_s_bitscore_map,
+        }
+    ) 
 }
 
 fn build_subject_cover(
     slen: usize,
     sstarts: Vec<usize>,
     sends: Vec<usize>,
-) ->     Result<Array1<u32>, Box<dyn Error>> {
+) ->    Array1<u32> {
 
     let mut cov_arr = Array1::<u32>::zeros(slen);
 
     for i in 0..sstarts.len() {
         if sends[i] > slen {
-            println!("Incorrect send discovered!");
+            println!("Send {} is greater than slen {}!", sends[i], slen);
         }
         cov_arr.slice_mut(s![sstarts[i]-1..sends[i]]).mapv_inplace(|x| x + 1);
     }
 
-    Ok(cov_arr)
+    cov_arr
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Parse command line arguments
     let opts = Args::parse();
+
+    let strim_5 = 15;
+    let strim_3 = 15;
+    let sd_mean_cutoff = 2.0;
     
-    let (queries_vec, subjects_vec, aligned_matrix, bitscore_matrix, sstart_matrix, send_matrix, sseqid_slen_map, qseqid_indices, sseqid_indices) = read_alignment(&opts.aln)?;
-    println!("Number of subjects: {}", subjects_vec.len());
-    println!("Number of queries: {}", queries_vec.len());
-    println!("Number of subject lengths: {}", sseqid_slen_map.len());
-    println!("Aligned Matrix Shape: {:?}", aligned_matrix.shape());
-    println!("Bitscore Matrix Shape: {:?}", bitscore_matrix.shape());
-    println!("Sstart Matrix Shape: {:?}", sstart_matrix.shape());
-    println!("Send Matrix Shape: {:?}", send_matrix.shape());
+    let mut alignments = read_alignment(&opts.aln)?;
+
+    println!("Number of Subjects: {:?}", alignments.sseqid_set.len());
+    println!("Number of Queries: {:?}", alignments.qseqid_set.len());
 
 
+    
+    // 1.  First subject depth / evenness filter.
+    // Thread safe place to add our filtered subjects
 
-    // First coverage filter
+    let subjects_to_be_removed: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
-    let strim_5 = 18;
-    let strim_3 = 18;
-    let sd_mean_cutoff = 1.0;
-
-    let mut subj_pass_arr: Vec<usize> = vec![0; subjects_vec.len()];
-
-    for subj_i in 0..subjects_vec.len() {
-        let row_subj = &subjects_vec[subj_i];
-        let row_slen = sseqid_slen_map[row_subj];
-        let row_sstarts = sstart_matrix.slice_outer(subj_i..subj_i+1).data().to_vec();
-        let row_sends = send_matrix.slice_outer(subj_i..subj_i+1).data().to_vec();
-
+    alignments.sseqid_set.par_iter().for_each(|subj|{
+        let mut s_queries: Vec<_> = alignments.qseqid_set.intersection(
+            &alignments.sstarts_map[subj].keys().cloned().collect()
+        ).cloned().collect();
+        s_queries.sort();
+        let mut sstarts_vec: Vec<usize> = Vec::new();
+        let mut sends_vec: Vec<usize> = Vec::new();
+        for s_q in &s_queries {
+            sstarts_vec.push(
+                alignments.sstarts_map[subj][s_q].clone()
+            );
+            sends_vec.push(
+                alignments.sends_map[subj][s_q].clone()
+            );            
+        }
         let cov_arr = build_subject_cover(
-            row_slen,
-            row_sstarts,
-            row_sends
-        )?;
+            alignments.slen_map[subj],
+            sstarts_vec,
+            sends_vec
+        );
 
-        // A bunch of stuff to support trimming 5' and 3' ends checking to be sure the subject is big enough to support this...
         let  cov_arr_f32: Array1<f32>;
+
         if cov_arr.len() > (strim_5 + strim_3) {
                 cov_arr_f32 = cov_arr.slice(s![strim_5..(cov_arr.len() - strim_3)]).mapv(|x| x as f32);
         }  else {
@@ -201,16 +186,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         let cov_mean = cov_arr_f32.mean_axis(Axis(0)).unwrap().into_scalar();
         let cov_std = cov_arr_f32.std_axis(Axis(0), 0.0).into_scalar();
         let cov_pass = (cov_std / cov_mean) < sd_mean_cutoff;
-        // Finally record the pass / fail here
-        if cov_pass {
-            subj_pass_arr[subj_i] = 1;
-        } else {
-            subj_pass_arr[subj_i] = 0;
+        if !cov_pass {
+            // Acquire lock for writing
+            let mut subjects_to_be_removed_set = subjects_to_be_removed.lock().unwrap();
+            subjects_to_be_removed_set.insert(subj.clone());
         }
-        
-    } // end of first subject coverage filter 
+    }); // End first coverage pass iteration
+     // Acquire lock for reading
+    let subjects_to_be_removed_set = subjects_to_be_removed.lock().unwrap();
+    alignments.sseqid_set = alignments.sseqid_set.difference(
+        &subjects_to_be_removed_set
+    ).cloned().collect();
+    println!("{:?} subjects pruned in first filter. There are {} subjects remaining", subjects_to_be_removed_set.len(), alignments.sseqid_set.len());
 
-    println!("{:?}", subj_pass_arr);
+
 
     Ok(())
 }
