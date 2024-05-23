@@ -11,21 +11,13 @@ use ndarray::{Array1, s, Axis};
 use rayon::prelude::*;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Instant;
 
 #[derive(Parser, Debug)] 
 #[command(version, about)]
 struct Args {
     #[arg(short, long, value_name = "FILE", required = true)]
     aln: String,
-}
-
-struct AlnRec {
-    qseqid: String,
-    sseqid: String,
-    slen: usize,
-    sstart: usize,
-    send: usize,
-    bitscore: f32,
 }
 
 struct Alignments {
@@ -41,6 +33,8 @@ struct Alignments {
 fn read_alignment(file_path: &str) -> 
     Result<Alignments, Box<dyn Error>> {
     println!("Attempting to open alignment and autodetect if gzipped or not");
+    let start = Instant::now(); // Record start time
+
     // Check if the file path ends with ".gz"
     let is_gzipped = file_path.ends_with(".gz");
 
@@ -103,7 +97,10 @@ fn read_alignment(file_path: &str) ->
         ).insert(sseqid.clone(), bitscore.clone());
     }
 
-    println!("Completed reading of alignments.");
+    let end = Instant::now(); // Record end time
+    let elapsed = end.duration_since(start).as_secs();
+
+    println!("Completed reading of alignments in {:?} seconds", elapsed);
 
     Ok(
         Alignments{
@@ -147,12 +144,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Number of Subjects: {:?}", alignments.sseqid_set.len());
     println!("Number of Queries: {:?}", alignments.qseqid_set.len());
-
-
     
     // 1.  First subject depth / evenness filter.
     // Thread safe place to add our filtered subjects
-
+    println!("Starting First Coverage Filter");
+    let start_cov_filt_1 = Instant::now(); // Record start time
     let subjects_to_be_removed: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
     alignments.sseqid_set.par_iter().for_each(|subj|{
@@ -197,8 +193,32 @@ fn main() -> Result<(), Box<dyn Error>> {
     alignments.sseqid_set = alignments.sseqid_set.difference(
         &subjects_to_be_removed_set
     ).cloned().collect();
-    println!("{:?} subjects pruned in first filter. There are {} subjects remaining", subjects_to_be_removed_set.len(), alignments.sseqid_set.len());
+    println!("{:?} subjects pruned in first filter. There are {:?} subjects remaining.", subjects_to_be_removed_set.len(), alignments.sseqid_set.len());
 
+    let end_cov_filt_1 = Instant::now(); // Record end time
+    let elapsed_cov_filt_1 = end_cov_filt_1.duration_since(start_cov_filt_1).as_secs();
+
+    println!("Completed first coverage filter in {:?} seconds", elapsed_cov_filt_1);
+
+    // bitscore-based filtering
+    for (query, qs_bitscores) in &alignments.q_s_bitscore_map {
+        println!("{}", query);
+    
+
+        let q_bitscores: Vec<f32> = qs_bitscores.iter()
+            .filter_map(|(s, bs)| if alignments.sseqid_set.contains(s) {Some(*bs)} else {None})
+            .collect();
+        
+        let q_total_bitscore: f32 = q_bitscores.iter().sum();
+
+        let q_aln_score: HashMap<String, f32> = qs_bitscores.iter()
+            .map(|(s, bs)| (s.clone(), bs / q_total_bitscore))
+            .collect();
+        
+        println!("{:?}", q_aln_score);
+        //println!("{:?}", qs_bitscores);
+        break;
+    }
 
 
     Ok(())
