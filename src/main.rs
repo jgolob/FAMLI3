@@ -192,7 +192,7 @@ fn bitscore_filter(
     alignments: &Alignments,
     max_iterations: usize,
     filter_frac: f32,
-) -> bool {
+) -> Alignments {
 
     // Get our current queries as an ordered vector.
     let mut queries_vec: Vec<String> = alignments.qseqid_set.clone()
@@ -273,33 +273,47 @@ fn bitscore_filter(
         }
     } // End iteration
     
-    println!("Generating a new set of alignments that passed this filter.")
+    println!("Generating a new set of alignments that passed this filter.");
     // Create a new Alignments structure just of those alignments that passed the filter...
     // subject lengths as a hashmap
-    let mut new_slen_map: HashMap<String, usize> = HashMap::new();
+    let mut slen_map: HashMap<String, usize> = HashMap::new();
 
     // Collect unique qseqids and sseqids
-    let mut new_qseqid_set: HashSet<String> = HashSet::new();
-    let mut new_sseqid_set: HashSet<String> = HashSet::new();
+    let mut qseqid_set: HashSet<String> = HashSet::new();
+    let mut sseqid_set: HashSet<String> = HashSet::new();
 
     // Per subject query sstart and sends as nested HashMap[subject_id][query_id] = u32 
-    let mut new_sstarts_map: HashMap<String, HashMap<String, usize>> = HashMap::new();
-    let mut new_sends_map: HashMap<String, HashMap<String, usize>> = HashMap::new();
+    let mut sstarts_map: HashMap<String, HashMap<String, usize>> = HashMap::new();
+    let mut sends_map: HashMap<String, HashMap<String, usize>> = HashMap::new();
 
     // Bitscores for each subject / query pairing HashMap[Query][Subject] = f32 (bitscore)
-    let mut new_q_s_bitscore_map: HashMap<String, HashMap<String, f32>> = HashMap::new();
+    let mut q_s_bitscore_map: HashMap<String, HashMap<String, f32>> = HashMap::new();
 
     for (q_i, qseqid )in queries_vec.iter().enumerate() {
-        new_qseqid_set.insert(qseqid.clone());
+        qseqid_set.insert(qseqid.clone());
         let q_aln_scores = &aln_scores[q_i];
-        new_sseqid_set.extend(q_aln_scores.keys().cloned());
-        
-        break;
-
+        sseqid_set.extend(q_aln_scores.keys().cloned());
+        for sseqid in q_aln_scores.keys() {
+            slen_map.insert(sseqid.clone(), alignments.slen_map[sseqid].clone());
+            sstarts_map.entry(
+                sseqid.clone()).or_insert(HashMap::new()
+            ).insert(qseqid.clone(), alignments.sstarts_map[sseqid][qseqid].clone());
+            sends_map.entry(
+                sseqid.clone()).or_insert(HashMap::new()
+            ).insert(qseqid.clone(), alignments.sends_map[sseqid][qseqid].clone());
+            q_s_bitscore_map.entry(
+                qseqid.clone()).or_insert(HashMap::new()
+            ).insert(sseqid.clone(), alignments.q_s_bitscore_map[qseqid][sseqid].clone());
+        }
     }
-
-
-    true
+    Alignments{
+        qseqid_set,
+        sseqid_set,
+        slen_map,
+        sstarts_map,
+        sends_map,
+        q_s_bitscore_map,
+    }
 }
 
 
@@ -338,19 +352,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     // BITSCORE FILTER
     println!("Starting bitscore filter.");
 
-    bitscore_filter(
+    let mut post_filter_aln = bitscore_filter(
         &alignments,
         15,
         0.9,
     );
-    // The overall objective is to get as close to each query having exactly one subject to which it is assigned
-    /* Initially:
-    // 1. generate an 'alignment score' that is the s-q bitscore divided by the total bitscore for a *query*
-    // -> This requires obtaining all of the (remaining) alignments for a *query*
-    // -> Cache as nested hashmaps, both of 
-    // 2. Initialize a 'subject weight', at first 1 / subject_len
-    
 
-    */
+    // Final Coverage filter
+    post_filter_aln.sseqid_set = coverage_filter(
+        &post_filter_aln,
+        strim_5,
+        strim_3,
+        sd_mean_cutoff,
+    );
+
+    
+    
     Ok(())
 }
