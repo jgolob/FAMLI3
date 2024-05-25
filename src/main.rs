@@ -1,9 +1,12 @@
 extern crate clap;
 extern crate ndarray;
 extern crate rayon;
+extern crate serde_json;
 
 use clap::Parser;
 use std::fs::File;
+use std::io::Write;
+use serde_json::json;
 use std::io::{BufReader, Read};
 use std::error::Error;
 use std::collections::{HashMap, HashSet};
@@ -27,6 +30,16 @@ struct Alignments {
     sstarts_map: HashMap<String, HashMap<String, usize>>, // sseqid / qseqid / sstart
     sends_map: HashMap<String, HashMap<String, usize>>, // sseqid / qseqid // send
     q_s_bitscore_map: HashMap<String, HashMap<String, f32>>, // qseqid / sseqid / bitscore
+}
+
+#[derive(Clone)]
+struct SubjectCoverage {
+    cov: f32, // Fraction of subject covered with at least one read
+    depth: f32, // Average number of reads per location
+    std: f32, // standard deviation of the depth
+    nreads: usize, // number of reads assigned to this subject
+    length: usize,  // How long is this subject
+    id: String, // subject ID
 }
 
 
@@ -137,10 +150,11 @@ fn coverage_filter(
     strim_5: usize,
     strim_3: usize,
     sd_mean_cutoff: f32,
-) -> HashSet<String> {
+) -> (HashSet<String>, HashMap<String, SubjectCoverage>) {
 
     // Thread safe place to add our filtered subjects
     let subjects_to_be_removed: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+    let subject_coverages:  Arc<Mutex<HashMap<String, SubjectCoverage>>> = Arc::new(Mutex::new(HashMap::new()));
 
     alignments.sseqid_set.par_iter().for_each(|subj|{
         let mut s_queries: Vec<_> = alignments.qseqid_set.intersection(
@@ -172,20 +186,42 @@ fn coverage_filter(
         }
         let cov_mean = cov_arr_f32.mean_axis(Axis(0)).unwrap().into_scalar();
         let cov_std = cov_arr_f32.std_axis(Axis(0), 0.0).into_scalar();
+        let cov_cov = cov_arr_f32.iter().filter(|&val| *val > 0.0).count() as f32 / cov_arr_f32.len() as f32;
         let cov_pass = (cov_std / cov_mean) < sd_mean_cutoff;
         if !cov_pass {
             // Acquire lock for writing
             let mut subjects_to_be_removed_set = subjects_to_be_removed.lock().unwrap();
             subjects_to_be_removed_set.insert(subj.clone());
         }
+        {
+            let mut map = subject_coverages.lock().unwrap();
+            map.insert(subj.clone(), SubjectCoverage {
+                id: subj.clone(),
+                depth: cov_mean,
+                std: cov_std,
+                length: cov_arr.len(),
+                nreads: s_queries.len(),
+                cov: cov_cov,
+            });
+        }
     }); // End first coverage pass iteration
     // Acquire lock for reading
     let subjects_to_be_removed_set = subjects_to_be_removed.lock().unwrap();
 
+    // Clone the HashMap within the Arc<Mutex<HashMap>>
+    let subject_coverages_map: HashMap<String, SubjectCoverage> = {
+        let map = subject_coverages.lock().unwrap();
+        map.clone()
+    };
 
-    alignments.sseqid_set.difference(
-        &subjects_to_be_removed_set
-    ).cloned().collect()
+
+    (
+        alignments.sseqid_set.difference(
+            &subjects_to_be_removed_set
+        ).cloned().collect(),
+        subject_coverages_map
+    )
+
 }
 
 fn bitscore_filter(
@@ -336,7 +372,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Starting First Coverage Filter");
     let start_cov_filt_1 = Instant::now(); // Record start time
 
-    alignments.sseqid_set = coverage_filter(
+    (alignments.sseqid_set, _) = coverage_filter(
         &alignments,
         strim_5,
         strim_3,
@@ -359,14 +395,24 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     // Final Coverage filter
-    post_filter_aln.sseqid_set = coverage_filter(
+    let mut final_subject_coverages: HashMap<String, SubjectCoverage> = HashMap::new();
+    (post_filter_aln.sseqid_set, final_subject_coverages) = coverage_filter(
         &post_filter_aln,
         strim_5,
         strim_3,
         sd_mean_cutoff,
     );
 
+    println!("{:?}", final_subject_coverages.len());
     
+    let subj_cov_vec: Vec<_> = final_subject_coverages.values().map(|subj_cov|{
+        subj_cov.clone()
+    })
+    .collect();
+
+    println!("{:?}", subj_cov_vec.len());
+    let json_data = json!(subj_cov_vec);
+
     
     Ok(())
 }
