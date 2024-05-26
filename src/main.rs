@@ -367,8 +367,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Parse command line arguments
     let opts = Args::parse();
 
-    let strim_5 = 15;
-    let strim_3 = 15;
+    let strim_5 = 18;
+    let strim_3 = 18;
     let sd_mean_cutoff = 3.0;
     
     let mut alignments = read_alignment(&opts.aln)?;
@@ -400,7 +400,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut post_filter_aln = bitscore_filter(
         &alignments,
-        15,
+        1000,
         0.9,
     );
 
