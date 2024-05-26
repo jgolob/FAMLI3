@@ -23,6 +23,14 @@ use std::time::Instant;
 struct Args {
     #[arg(short, long, value_name = "FILE", required = true)]
     aln: String,
+    #[arg(short, long, value_name = "FILE", required = true)]
+    output: String,
+    // strim_5 usize
+    // strim_3 usize
+    // sd_mean_cutoff f32
+    // filter_fract f32
+    // max_iterations usize
+    
 }
 
 struct Alignments {
@@ -361,7 +369,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let strim_5 = 15;
     let strim_3 = 15;
-    let sd_mean_cutoff = 2.0;
+    let sd_mean_cutoff = 3.0;
     
     let mut alignments = read_alignment(&opts.aln)?;
 
@@ -413,7 +421,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     
     let json_data = to_string_pretty(&subj_cov_vec)?;
 
-    let mut file = File::create("sample_output/subject_coverages.json")?;
+    let mut file = File::create(&opts.output)?;
     file.write_all(json_data.as_bytes())?;
     
     Ok(())
