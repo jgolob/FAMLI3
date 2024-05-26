@@ -2,11 +2,13 @@ extern crate clap;
 extern crate ndarray;
 extern crate rayon;
 extern crate serde_json;
+extern crate serde;
 
 use clap::Parser;
 use std::fs::File;
 use std::io::Write;
-use serde_json::json;
+use serde_json::to_string_pretty;
+use serde::Serialize;
 use std::io::{BufReader, Read};
 use std::error::Error;
 use std::collections::{HashMap, HashSet};
@@ -32,7 +34,7 @@ struct Alignments {
     q_s_bitscore_map: HashMap<String, HashMap<String, f32>>, // qseqid / sseqid / bitscore
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 struct SubjectCoverage {
     cov: f32, // Fraction of subject covered with at least one read
     depth: f32, // Average number of reads per location
@@ -403,16 +405,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         sd_mean_cutoff,
     );
 
-    println!("{:?}", final_subject_coverages.len());
     
     let subj_cov_vec: Vec<_> = final_subject_coverages.values().map(|subj_cov|{
         subj_cov.clone()
     })
     .collect();
+    
+    let json_data = to_string_pretty(&subj_cov_vec)?;
 
-    println!("{:?}", subj_cov_vec.len());
-    let json_data = json!(subj_cov_vec);
-
+    let mut file = File::create("sample_output/subject_coverages.json")?;
+    file.write_all(json_data.as_bytes())?;
     
     Ok(())
 }
