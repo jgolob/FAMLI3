@@ -15,5 +15,5 @@ serde = {version="1.0.203", features = ["derive"]}
 # Optional: Add dependencies for additional functionalities (e.g., logging)
 
 [[bin]]
-name = "FAMLI3"
+name = "famli3"
 path = "src/main.rs"
