@@ -25,11 +25,16 @@ struct Args {
     aln: String,
     #[arg(short, long, value_name = "FILE", required = true)]
     output: String,
-    // strim_5 usize
-    // strim_3 usize
-    // sd_mean_cutoff f32
-    // filter_fract f32
-    // max_iterations usize
+    #[arg(long, default_value_t=18)]
+    strim_5: usize,
+    #[arg(long, default_value_t=18)]
+    strim_3: usize,
+    #[arg(long, default_value_t=3.0)]
+    sd_mean_cutoff: f32,
+    #[arg(long, default_value_t=0.9)]
+    filter_fract: f32,
+    #[arg(long, default_value_t=1000)]
+    max_iterations: usize,
     
 }
 
@@ -366,10 +371,6 @@ fn bitscore_filter(
 fn main() -> Result<(), Box<dyn Error>> {
     // Parse command line arguments
     let opts = Args::parse();
-
-    let strim_5 = 18;
-    let strim_3 = 18;
-    let sd_mean_cutoff = 3.0;
     
     let mut alignments = read_alignment(&opts.aln)?;
 
@@ -384,9 +385,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     (alignments.sseqid_set, _) = coverage_filter(
         &alignments,
-        strim_5,
-        strim_3,
-        sd_mean_cutoff,
+        opts.strim_5,
+        opts.strim_3,
+        opts.sd_mean_cutoff,
     );
 
     let end_cov_filt_1 = Instant::now(); // Record end time
@@ -400,17 +401,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut post_filter_aln = bitscore_filter(
         &alignments,
-        1000,
-        0.9,
+        opts.max_iterations,
+        opts.filter_fract,
     );
 
     // Final Coverage filter
     let mut final_subject_coverages: HashMap<String, SubjectCoverage> = HashMap::new();
     (post_filter_aln.sseqid_set, final_subject_coverages) = coverage_filter(
         &post_filter_aln,
-        strim_5,
-        strim_3,
-        sd_mean_cutoff,
+        opts.strim_5,
+        opts.strim_3,
+        opts.sd_mean_cutoff,
     );
 
     
