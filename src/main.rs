@@ -292,9 +292,9 @@ fn bitscore_filter(
             for score in adjusted_qs_scores.values_mut() {
                 *score = *score / q_total_score;
             }
-            let mut filtered_adjusted_qs_scores: HashMap<String, f32> = HashMap::new();
+            let filtered_adjusted_qs_scores: HashMap<String, f32> = 
             if adjusted_qs_scores.len() == 1 {
-                filtered_adjusted_qs_scores = adjusted_qs_scores; 
+                adjusted_qs_scores
             } else {
                 // Filtering.
                 // Identify the max score for this query:
@@ -303,15 +303,16 @@ fn bitscore_filter(
 
                 let q_cutoff = q_max_score * filter_frac;
                 
-                filtered_adjusted_qs_scores = adjusted_qs_scores.iter()
+                let filtered_adjusted_qs_scores: HashMap<String, f32> = adjusted_qs_scores.iter()
                     .filter(|&(_, &value)| value >= q_cutoff)
                     .map(|(key, &value)| (key.clone(), value))
                     .collect();
                 if adjusted_qs_scores.len() != filtered_adjusted_qs_scores.len() {
                     let mut iter_n_filtered_lock = iter_n_filtered.lock().unwrap();
                     *iter_n_filtered_lock += adjusted_qs_scores.len() - filtered_adjusted_qs_scores.len();
-                }       
-            }
+                }
+                filtered_adjusted_qs_scores    
+            };
             filtered_adjusted_qs_scores
         })
         .collect::<Vec<HashMap<String, f32>>>();
@@ -399,16 +400,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     // BITSCORE FILTER
     println!("Starting bitscore filter.");
 
-    let mut post_filter_aln = bitscore_filter(
+    let post_bs_filter_aln = bitscore_filter(
         &alignments,
         opts.max_iterations,
         opts.filter_fract,
     );
 
     // Final Coverage filter
-    let mut final_subject_coverages: HashMap<String, SubjectCoverage> = HashMap::new();
-    (post_filter_aln.sseqid_set, final_subject_coverages) = coverage_filter(
-        &post_filter_aln,
+    //let mut final_subject_coverages: HashMap<String, SubjectCoverage> = HashMap::new();
+    let (_, final_subject_coverages) = coverage_filter(
+        &post_bs_filter_aln,
         opts.strim_5,
         opts.strim_3,
         opts.sd_mean_cutoff,
