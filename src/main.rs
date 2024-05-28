@@ -59,7 +59,7 @@ struct Alignments {
 
 #[derive(Clone, Serialize)]
 struct SubjectCoverage {
-    cov: f32, // Fraction of subject covered with at least one read
+    coverage: f32, // Fraction of subject covered with at least one read
     depth: f32, // Average number of reads per location
     std: f32, // standard deviation of the depth
     nreads: usize, // number of reads assigned to this subject
@@ -227,7 +227,7 @@ fn coverage_filter(
                 std: cov_std,
                 length: cov_arr.len(),
                 nreads: s_queries.len(),
-                cov: cov_cov,
+                coverage: cov_cov,
             });
         }
     }); // End first coverage pass iteration
