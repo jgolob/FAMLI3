@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*.*.*'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -77,14 +80,23 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - name: Download artifacts
+      - name: Download Ubuntu artifacts
         uses: actions/download-artifact@v3
         with:
-          name: famli3-${{ github.ref_name }}-${{ matrix.os }}
+          name: famli3-${{ github.ref_name }}-ubuntu-latest
+          path: artifacts
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: famli3-${{ github.ref_name }}-macos-latest
+          path: artifacts
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: famli3-${{ github.ref_name }}-windows-latest.exe
           path: artifacts
 
       - name: Create Release
@@ -98,12 +110,32 @@ jobs:
           draft: false
           prerelease: false
 
-      - name: Upload Release Assets
+      - name: Upload Ubuntu Release Assets
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/famli3-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.extension }}
-          asset_name: famli3-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.extension }}
+          asset_path: artifacts/famli3-${{ github.ref_name }}-ubuntu-latest
+          asset_name: famli3-${{ github.ref_name }}-ubuntu-latest
+          asset_content_type: application/octet-stream
+
+      - name: Upload macOS Release Assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/famli3-${{ github.ref_name }}-macos-latest
+          asset_name: famli3-${{ github.ref_name }}-macos-latest
+          asset_content_type: application/octet-stream
+
+      - name: Upload Windows Release Assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/famli3-${{ github.ref_name }}-windows-latest.exe
+          asset_name: famli3-${{ github.ref_name }}-windows-latest.exe
           asset_content_type: application/octet-stream
