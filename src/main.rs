@@ -4,6 +4,9 @@ extern crate rayon;
 extern crate serde_json;
 extern crate serde;
 extern crate num_cpus;
+extern crate log;
+extern crate env_logger;
+extern crate chrono;
 
 use clap::Parser;
 use std::fs::File;
@@ -17,6 +20,9 @@ use ndarray::{Array1, s, Axis};
 use rayon::prelude::*;
 use std::sync::Arc;
 use std::sync::Mutex;
+
+use log::{info, error, LevelFilter};
+use env_logger::Builder;
 use std::time::Instant;
 
 
@@ -64,7 +70,8 @@ struct SubjectCoverage {
 
 fn read_alignment(file_path: &str) -> 
     Result<Alignments, Box<dyn Error>> {
-    println!("Attempting to open alignment and autodetect if gzipped or not");
+    info!("Attempting to open alignment and autodetect if gzipped or not");
+
     let start = Instant::now(); // Record start time
 
     // Check if the file path ends with ".gz"
@@ -89,7 +96,7 @@ fn read_alignment(file_path: &str) ->
         .from_reader(reader);
 
     
-    println!("Starting to read in alignments");
+    info!("Starting to read in alignments");
     
     // subject lengths as a hashmap
     let mut slen_map: HashMap<String, usize> = HashMap::new();
@@ -132,7 +139,7 @@ fn read_alignment(file_path: &str) ->
     let end = Instant::now(); // Record end time
     let elapsed = end.duration_since(start).as_secs();
 
-    println!("Completed reading of alignments in {:?} seconds", elapsed);
+    info!("Completed reading of alignments in {:?} seconds", elapsed);
 
     Ok(
         Alignments{
@@ -156,7 +163,7 @@ fn build_subject_cover(
 
     for i in 0..sstarts.len() {
         if sends[i] > slen {
-            println!("Send {} is greater than slen {}!", sends[i], slen);
+            error!("Send {} is greater than slen {}!", sends[i], slen);
         }
         cov_arr.slice_mut(s![sstarts[i]-1..sends[i]]).mapv_inplace(|x| x + 1);
     }
@@ -323,13 +330,13 @@ fn bitscore_filter(
 
         let iter_filtered_final  = *iter_n_filtered.lock().unwrap();
 
-        println!("Filtered {:?} alignments on iteration {:?}", iter_filtered_final, iter+1);
+        info!("Filtered {:?} alignments on iteration {:?}", iter_filtered_final, iter+1);
+
         if iter_filtered_final == 0 {
             break;
         }
     } // End iteration
-    
-    println!("Generating a new set of alignments that passed this filter.");
+    info!("Generating a new set of alignments that passed this filter.");
     // Create a new Alignments structure just of those alignments that passed the filter...
     // subject lengths as a hashmap
     let mut slen_map: HashMap<String, usize> = HashMap::new();
@@ -380,15 +387,30 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Set the global thread pool with the specified number of threads
     rayon::ThreadPoolBuilder::new().num_threads(opts.max_cpus).build_global().unwrap();
 
+    // Initialize the logger with a custom format
+    Builder::new()
+    .format(|buf, record| {
+        writeln!(
+            buf,
+            "{} {:<8} [FAMLI3] {}",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+            record.level(),
+            record.args()
+        )
+    })
+    .filter(None, LevelFilter::Info)
+    .init();
+
+
     let mut alignments = read_alignment(&opts.aln)?;
 
-    println!("Number of Subjects: {:?}", alignments.sseqid_set.len());
-    println!("Number of Queries: {:?}", alignments.qseqid_set.len());
+    info!("Number of Subjects: {:?}", alignments.sseqid_set.len());
+    info!("Number of Queries: {:?}", alignments.qseqid_set.len());
     
 
     // 1.  First subject depth / evenness filter.
-    
-    println!("Starting First Coverage Filter");
+    info!("Starting First Coverage Filter");
+
     let start_cov_filt_1 = Instant::now(); // Record start time
 
     (alignments.sseqid_set, _) = coverage_filter(
@@ -400,12 +422,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let end_cov_filt_1 = Instant::now(); // Record end time
     let elapsed_cov_filt_1 = end_cov_filt_1.duration_since(start_cov_filt_1).as_secs();
-    println!("Completed first coverage filter in {:?} seconds", elapsed_cov_filt_1);
+    info!("Completed first coverage filter in {:?} seconds", elapsed_cov_filt_1);    
+    info!("There are {:?} subjects remaining after the first coverage filter.", alignments.sseqid_set.len());
 
-    println!("There are {:?} subjects remaining after the first coverage filter.", alignments.sseqid_set.len());
 
     // BITSCORE FILTER
-    println!("Starting bitscore filter.");
+    info!("Starting bitscore filter.");
 
     let post_bs_filter_aln = bitscore_filter(
         &alignments,
