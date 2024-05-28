@@ -11,6 +11,7 @@ ndarray = "0.15.3"
 rayon = "1.10.0"
 serde_json = "1.0.117"
 serde = {version="1.0.203", features = ["derive"]}
+num_cpus = "1.16.0"
 
 # Optional: Add dependencies for additional functionalities (e.g., logging)
 

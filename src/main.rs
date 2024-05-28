@@ -3,6 +3,7 @@ extern crate ndarray;
 extern crate rayon;
 extern crate serde_json;
 extern crate serde;
+extern crate num_cpus;
 
 use clap::Parser;
 use std::fs::File;
@@ -17,6 +18,7 @@ use rayon::prelude::*;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Instant;
+
 
 #[derive(Parser, Debug)] 
 #[command(version, about)]
@@ -35,6 +37,8 @@ struct Args {
     filter_fract: f32,
     #[arg(long, default_value_t=1000)]
     max_iterations: usize,
+    #[arg(long, default_value_t = num_cpus::get())]
+    max_cpus: usize,    
     
 }
 
@@ -373,6 +377,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Parse command line arguments
     let opts = Args::parse();
     
+    // Set the global thread pool with the specified number of threads
+    rayon::ThreadPoolBuilder::new().num_threads(opts.max_cpus).build_global().unwrap();
+
     let mut alignments = read_alignment(&opts.aln)?;
 
     println!("Number of Subjects: {:?}", alignments.sseqid_set.len());
