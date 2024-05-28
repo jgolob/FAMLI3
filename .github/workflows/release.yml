@@ -74,14 +74,17 @@ jobs:
           name: famli3-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.extension }}
           path: artifacts/famli3-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.extension }}
 
-  release:
+ release:
     needs: build
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v3
         with:
-          name: famli3-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.extension }}
+          name: famli3-${{ github.ref_name }}-${{ matrix.os }}
           path: artifacts
 
       - name: Create Release
