@@ -1,6 +1,6 @@
 [package]
 name = "FAMLI3"
-version = "3.0.0-pre6"
+version = "3.0.0"
 authors = ["Jonathan Golob <j-dev@golob.org>"]
 
 [dependencies]
