@@ -66,7 +66,7 @@ jobs:
         run: mkdir -p artifacts
 
       - name: Copy binary to artifacts
-        run: cp target/${{ matrix.target }}/release/famli3 artifacts/famli3-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.extension }}
+        run: cp target/${{ matrix.target }}/release/famli3${{ matrix.extension }} artifacts/famli3-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.extension }}
 
       - name: Upload release assets
         uses: actions/upload-artifact@v3
