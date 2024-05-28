@@ -30,7 +30,7 @@ use std::time::Instant;
 #[command(version, about)]
 struct Args {
     #[arg(short, long, value_name = "FILE", required = true)]
-    aln: String,
+    input: String,
     #[arg(short, long, value_name = "FILE", required = true)]
     output: String,
     #[arg(long, default_value_t=18)]
@@ -44,7 +44,7 @@ struct Args {
     #[arg(long, default_value_t=1000)]
     max_iterations: usize,
     #[arg(long, default_value_t = num_cpus::get())]
-    max_cpus: usize,    
+    threads: usize,    
     
 }
 
@@ -385,7 +385,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let opts = Args::parse();
     
     // Set the global thread pool with the specified number of threads
-    rayon::ThreadPoolBuilder::new().num_threads(opts.max_cpus).build_global().unwrap();
+    rayon::ThreadPoolBuilder::new().num_threads(opts.threads).build_global().unwrap();
 
     // Initialize the logger with a custom format
     Builder::new()
@@ -402,7 +402,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     .init();
 
 
-    let mut alignments = read_alignment(&opts.aln)?;
+    let mut alignments = read_alignment(&opts.input)?;
 
     info!("Number of Subjects: {:?}", alignments.sseqid_set.len());
     info!("Number of Queries: {:?}", alignments.qseqid_set.len());
