@@ -40,7 +40,7 @@ struct Args {
     #[arg(long, default_value_t=3.0)]
     sd_mean_cutoff: f32,
     #[arg(long, default_value_t=0.9)]
-    filter_fract: f32,
+    filter_fract: f64,
     #[arg(long, default_value_t=1000)]
     max_iterations: usize,
     #[arg(long, default_value_t = num_cpus::get())]
@@ -253,7 +253,7 @@ fn coverage_filter(
 fn bitscore_filter(
     alignments: &Alignments,
     max_iterations: usize,
-    filter_frac: f32,
+    filter_frac: f64,
 ) -> Alignments {
 
     // Get our current queries as an ordered vector.
@@ -268,18 +268,18 @@ fn bitscore_filter(
     let mut aln_scores = queries_vec.clone().into_par_iter()
         .map(|query| {
             let qbitscores = alignments.q_s_bitscore_map[&query.clone()].clone();
-            let qbitscore_total: f32 = qbitscores.values().sum();
+            let qbitscore_total: f64 = qbitscores.values().sum::<f32>() as f64;
 
             qbitscores.iter()
-                .map(|(subj, bs)| (subj.clone(), bs / qbitscore_total ))
-                .collect::<HashMap<String, f32>>()
+                .map(|(subj, bs)| (subj.clone(), *bs as f64 / qbitscore_total ))
+                .collect::<HashMap<String, f64>>()
         })
-        .collect::<Vec<HashMap<String, f32>>>();
+        .collect::<Vec<HashMap<String, f64>>>();
     
     for iter in 0..max_iterations {
         // Calculate a per-subject weighting. 
         // The total alignment weights assigned to this subject divided by the weight.
-        let mut subject_weights: HashMap<String, f32> = HashMap::new();
+        let mut subject_weights: HashMap<String, f64> = HashMap::new();
         aln_scores.iter().for_each(|qscores_map|{
             for (subj, score) in qscores_map.iter() {
                 *subject_weights.entry(subj.clone()).or_insert(0.0) += *score;
@@ -296,25 +296,25 @@ fn bitscore_filter(
             let mut adjusted_qs_scores = q_s_scores.iter()
                 .map(|(subj, score)|{
                     (subj.clone(), score * subject_weights[subj])
-                }).collect::<HashMap<String, f32>>();
+                }).collect::<HashMap<String, f64>>();
             // Get the new total sum of scores for this query
-            let q_total_score: f32 = adjusted_qs_scores.values().sum();
+            let q_total_score: f64 = adjusted_qs_scores.values().sum();
             // Then renormalize so the total scores equal 1 for this query by dividing by total
             for score in adjusted_qs_scores.values_mut() {
                 *score = *score / q_total_score;
             }
-            let filtered_adjusted_qs_scores: HashMap<String, f32> = 
+            let filtered_adjusted_qs_scores: HashMap<String, f64> = 
             if adjusted_qs_scores.len() == 1 {
                 adjusted_qs_scores
             } else {
                 // Filtering.
                 // Identify the max score for this query:
                 let q_max_score = adjusted_qs_scores.values()
-                    .fold(f32::NEG_INFINITY, |max, value| f32::max(max, *value));
+                    .fold(f64::NEG_INFINITY, |max, value| f64::max(max, *value));
 
                 let q_cutoff = q_max_score * filter_frac;
                 
-                let filtered_adjusted_qs_scores: HashMap<String, f32> = adjusted_qs_scores.iter()
+                let filtered_adjusted_qs_scores: HashMap<String, f64> = adjusted_qs_scores.iter()
                     .filter(|&(_, &value)| value >= q_cutoff)
                     .map(|(key, &value)| (key.clone(), value))
                     .collect();
@@ -326,7 +326,7 @@ fn bitscore_filter(
             };
             filtered_adjusted_qs_scores
         })
-        .collect::<Vec<HashMap<String, f32>>>();
+        .collect::<Vec<HashMap<String, f64>>>();
 
         let iter_filtered_final  = *iter_n_filtered.lock().unwrap();
 
