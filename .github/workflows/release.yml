@@ -74,7 +74,7 @@ jobs:
           name: famli3-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.extension }}
           path: artifacts/famli3-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.extension }}
 
- release:
+  release:
     needs: build
     runs-on: ubuntu-latest
     strategy:
