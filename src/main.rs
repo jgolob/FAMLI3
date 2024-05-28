@@ -428,32 +428,41 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // BITSCORE FILTER
     info!("Starting bitscore filter.");
-
+    let start_bs_filt = Instant::now(); // Record start time
     let post_bs_filter_aln = bitscore_filter(
         &alignments,
         opts.max_iterations,
         opts.filter_fract,
     );
+    let end_bs_filt = Instant::now(); // Record end time
+    let elapsed_bs_filt = end_bs_filt.duration_since(start_bs_filt).as_secs();
+    info!("Completed bitscore filter in a total of {:?} seconds.", elapsed_bs_filt);
 
     // Final Coverage filter
-    //let mut final_subject_coverages: HashMap<String, SubjectCoverage> = HashMap::new();
+    info!("Starting final coverage filter");
+    let start_cov_filt_2 = Instant::now(); // Record start time
     let (_, final_subject_coverages) = coverage_filter(
         &post_bs_filter_aln,
         opts.strim_5,
         opts.strim_3,
         opts.sd_mean_cutoff,
     );
+    let end_cov_filt_2 = Instant::now(); // Record end time
+    let elapsed_cov_filt_2 = end_cov_filt_2.duration_since(start_cov_filt_2).as_secs();
+    info!("Completed second coverage filter in {:?} seconds", elapsed_cov_filt_2);
 
-    
     let subj_cov_vec: Vec<_> = final_subject_coverages.values().map(|subj_cov|{
         subj_cov.clone()
     })
     .collect();
-    
-    let json_data = to_string_pretty(&subj_cov_vec)?;
+    info!("There are {:?} subjects remaining after all filters.", subj_cov_vec.len());
 
+    info!("Starting output to {:?}", &opts.output);
+
+    let json_data = to_string_pretty(&subj_cov_vec)?;
     let mut file = File::create(&opts.output)?;
     file.write_all(json_data.as_bytes())?;
+    info!("Completed!");
     
     Ok(())
 }
